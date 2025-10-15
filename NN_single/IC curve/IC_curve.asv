@@ -1,0 +1,20 @@
+clc,clear,close all
+load('B0005.mat');
+load('B0006.mat');
+load("B0007.mat");
+load("B0018.mat");
+
+train1 = trainGenaration(IC_SoC(B0005 ,'discharge'))
+train1 = trainGenaration(IC_SoC(B0005 ,'discharge'))
+
+function [train] = trainGenaration(cellin)
+    for i = 1:length(cellin)
+        cell = cellin(i);
+        SoH = [cell.SoH];
+        %train.data{i} = [cell.voltage', dQdV];
+        train.data{i} = [cell.Voltage_sequence; cell.SoC_sequence; cell.ICA_Gaussian];
+        train.label{i} = cell.SoH;
+    end
+        train.data = train.data';
+        train.label = cell2mat(train.label');
+end

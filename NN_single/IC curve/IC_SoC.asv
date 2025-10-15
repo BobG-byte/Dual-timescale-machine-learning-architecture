@@ -1,0 +1,182 @@
+clc,clear,close all
+load('B0005.mat');
+load('B0006.mat');
+load("B0007.mat");
+ 
+cell_NASA = B0005;
+data_type = 'charge';
+% cell_NASA = B0005;
+
+
+if strcmp(data_type, 'discharge')
+    cycleIdx = -1;
+    plotsize = [3.1,4,0,2.2e4];
+    initialSoC = 1; 
+elseif strcmp(data_type, 'charge')
+    cycleIdx = 1;
+    plotsize = [3.7, 4.15, 0, 2e4];
+    initialSoC = 0;
+else
+    fprintf('wrong data type');
+end
+
+
+ICA_data=struct;
+cycle_num=0;
+
+for i=1:length(cell_NASA.cycle)
+    cycle_type = cell_NASA.cycle(i).type;                            
+    value = strcmp(cycle_type,data_type);                  
+     if value
+       cycle_num=cycle_num+1;
+       ICA_data(cycle_num).Voltage_measured = cell_NASA.cycle(i).data.Voltage_measured;
+       ICA_data(cycle_num).Current_measured = cell_NASA.cycle(i).data.Current_measured; 
+       ICA_data(cycle_num).Charge_Time = cell_NASA.cycle(i).data.Time;
+       deltaT = [0, diff(ICA_data(cycle_num).Charge_Time)];
+       ICA_data(cycle_num).Capacity = sum(deltaT.*abs(ICA_data(cycle_num).Current_measured))/3600; 
+     end
+end
+
+%% 
+%voltage gap
+for m=1:cycle_num
+       ICA_data(m).SoH = ICA_data(m).Capacity/max(ICA_data.Capacity);
+    
+       %SoC
+       deltaT = [0, diff(ICA_data(m).Charge_Time)];
+       deltaSoC = (ICA_data(m).Current_measured.*deltaT)./(ICA_data(m).Capacity*3600);
+       %ΔV
+       deltaV=0.005;
+       
+       ICA_data(m).Voltage_sequence(1)= ICA_data(m).Voltage_measured(1);
+       ICA_data(m).Current_sequence(1) = ICA_data(m).Current_measured(1); 
+       ICA_data(m).Charge_Time_sequence(1) = ICA_data(m).Charge_Time(1);
+       Sequence_num=2;
+       sum_V=0;
+       
+       for k=2:length(ICA_data(m).Voltage_measured)
+           sum_V=sum_V+cycleIdx*(ICA_data(m).Voltage_measured(k)-ICA_data(m).Voltage_measured(k-1));
+           ICA_data(m).SoC(1) = initialSoC; % Set initial SoC        
+           ICA_data(m).SoC(k) = ICA_data(m).SoC(k-1) + deltaSoC(k);
+            
+           
+           if sum_V>=deltaV
+               sum_V=0;
+               ICA_data(m).Voltage_sequence(Sequence_num)=ICA_data(m).Voltage_measured(k);
+               ICA_data(m).Current_sequence(Sequence_num)=ICA_data(m).Current_measured(k);
+               ICA_data(m).Charge_Time_sequence(Sequence_num)=ICA_data(m).Charge_Time(k);
+               ICA_data(m).SoC_sequence(Sequence_num)=ICA_data(m).SoC(k);
+               Sequence_num=Sequence_num+1;
+           end
+       end
+end
+%% 
+
+%IC
+for n=1:cycle_num
+    ICA_data(n). ICA(1)=0;
+    for k=2:length(ICA_data(n).Voltage_sequence)
+       ICA_data(n).ICA(k)=ICA_data(n).Current_sequence(k-1)*(ICA_data(n).Charge_Time_sequence(k)-ICA_data(n).Charge_Time_sequence(k-1))/(ICA_data(n).Voltage_sequence(k)-ICA_data(n).Voltage_sequence(k-1));
+    end
+end
+%% 
+
+%ICA filter
+%1.MAF
+windowSize = 3; 
+b = (1/windowSize)*ones(1,windowSize);
+a = 1;
+for n=1:cycle_num
+    ICA_data(n).ICA_MAF=filter(b,a,ICA_data(n).ICA);
+end
+
+%2、MEDF
+for n=1:cycle_num
+    ICA_data(n).ICA_MEDF=medfilt1(ICA_data(n).ICA,4);
+end
+
+%3、LOESS
+for n=1:cycle_num
+    ICA_data(n).ICA_LOESS=smooth(ICA_data(n).ICA,9,'loess');
+end
+% 4. Gaussion filter
+sigma = 1;
+size = 5;
+gaussian_filter = fspecial('gaussian', size, sigma);
+
+for n = 1:cycle_num
+    ICA_data(n).ICA_Gaussian = filter2(gaussian_filter, ICA_data(n).ICA);
+end
+
+
+%%
+figure(1)
+subplot(2,2,1);
+for num=1:cycle_num
+    if num~=33&&num~=170&&mod(num,10)==0
+        plot(ICA_data(num).Voltage_sequence,ICA_data(num).ICA);
+        
+        hold on;
+    end
+end
+axis(plotsize);
+title("Raw");
+xlabel('Voltage(V)');
+ylabel('ΔQ/ΔV(Ah/V)');
+
+subplot(2,2,2);
+for num=1:cycle_num
+    if num~=33&&num~=170&&mod(num,10)==0
+        plot(ICA_data(num).Voltage_sequence,ICA_data(num).ICA_MAF);
+        hold on;
+    end
+end
+axis(plotsize);
+title("MAF");
+xlabel('Voltage(V)');
+ylabel('ΔQ/ΔV(Ah/V)');
+
+subplot(2,2,3);
+for num=1:cycle_num
+    if num~=33&&num~=170&&mod(num,10)==0
+        plot(ICA_data(num).Voltage_sequence,ICA_data(num).ICA_MEDF);
+        hold on;
+    end
+end
+axis(plotsize);
+title("MEDF");
+xlabel('Voltage(V)');
+ylabel('ΔQ/ΔV(Ah/V)');
+
+subplot(2,2,4);
+for num=1:cycle_num
+    if num~=33&&num~=170&&mod(num,10)==0
+        plot(ICA_data(num).Voltage_sequence,ICA_data(num).ICA_LOESS);
+        hold on;
+    end
+end
+axis(plotsize);
+title("Loess");
+xlabel('Voltage(V)');
+ylabel('ΔQ/ΔV(Ah/V)');
+
+
+figure(2);
+ax = gca;
+cmap = colormap(gca, jet(cycle_num)); 
+for num = 1:cycle_num
+    if num ~= 1 && num ~= 170 && mod(num, 1) == 0
+        color = num / cycle_num;
+        plot(ax, ICA_data(num).Voltage_sequence, ICA_data(num).ICA_Gaussian, 'Color', cmap(num,:));
+        hold on;
+    end
+end
+plotsize(4) = plotsize(4)/2;
+axis(plotsize);
+title(['IC curve ', '(',data_type, ')']);
+xlabel('Voltage(V)');
+ylabel('ΔQ/ΔV(Ah/V)');
+
+cb = colorbar;
+clim([1, cycle_num]);
+cb.Label.String = 'Cycle num';
